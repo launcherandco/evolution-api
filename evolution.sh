@@ -4,6 +4,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+echo -e "${GREEN}Iniciando Instalador Evolution API (Padrão Hífen)...${NC}"
+
 read -p "Link da API (ex: api.dominio.com): " evolution
 echo ""
 read -p "Deseja instalar/atualizar o MinIO? (s/n): " install_minio
@@ -23,10 +25,10 @@ minio_port=9000
 minio_console_port=9001
 
 if [ -f ".env" ]; then
-    echo -e "${YELLOW}Atualizando ambiente...${NC}"
+    echo -e "${YELLOW}-> Atualizando ambiente...${NC}"
     UNIQUE_TOKEN=$(grep AUTHENTICATION_API_KEY .env | cut -d'=' -f2)
 else
-    echo -e "${GREEN}Iniciando configuração limpa...${NC}"
+    echo -e "${GREEN}-> Configuração limpa...${NC}"
     UNIQUE_TOKEN=$(openssl rand -hex 16 | tr '[:lower:]' '[:upper:]')
 fi
 
@@ -43,9 +45,11 @@ LANGUAGE=pt-BR
 LOG_LEVEL=ERROR,WARN,DEBUG,INFO,LOG,VERBOSE,DARK,WEBHOOKS
 LOG_COLOR=true
 LOG_BAILEYS=error
+
+# Conexões padronizadas com hífen
 DATABASE_PROVIDER=postgresql
-DATABASE_CONNECTION_URI=postgresql://postgres:p8KkRN1EKeCbrou6@evolution_postgres:5432/evolution_db?schema=public
-DATABASE_CONNECTION_CLIENT_NAME=evolution_exchange
+DATABASE_CONNECTION_URI=postgresql://postgres:p8KkRN1EKeCbrou6@evolution-postgres:5432/evolution_db?schema=public
+DATABASE_CONNECTION_CLIENT_NAME=evolution-exchange
 DATABASE_SAVE_DATA_INSTANCE=true
 DATABASE_SAVE_DATA_NEW_MESSAGE=true
 DATABASE_SAVE_MESSAGE_UPDATE=true
@@ -53,11 +57,13 @@ DATABASE_SAVE_DATA_CONTACTS=true
 DATABASE_SAVE_DATA_CHATS=true
 DATABASE_SAVE_DATA_LABELS=true
 DATABASE_SAVE_DATA_HISTORIC=true
+
 CACHE_REDIS_ENABLED=true
-CACHE_REDIS_URI=redis://evolution_redis:6379/2
+CACHE_REDIS_URI=redis://evolution-redis:6379/2
 CACHE_REDIS_PREFIX_KEY=evolution
 CACHE_REDIS_SAVE_INSTANCES=false
 CACHE_LOCAL_ENABLED=false
+
 WEBHOOK_GLOBAL_ENABLED=true
 WEBHOOK_GLOBAL_URL=''
 WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS=true
@@ -78,9 +84,9 @@ S3_ACCESS_KEY=$minio_user
 S3_SECRET_KEY=$minio_password
 S3_BUCKET=evolution
 S3_PORT=$minio_port
-S3_ENDPOINT=$minio_domain
+S3_ENDPOINT=evolution-minio
 S3_REGION=us-east-1
-S3_USE_SSL=true
+S3_USE_SSL=false
 EOL
 fi
 
@@ -91,26 +97,26 @@ cat > docker-compose.yml << EOL
 version: '3.8'
 
 services:
-  api:
-    container_name: evolution_api
+  evolution-api:
+    container_name: evolution-api
     image: evoapicloud/evolution-api:latest
     restart: always
     ports:
       - "$api_port:$api_port"
     volumes:
-      - evolution_instances:/evolution/instances
+      - evolution-instances:/evolution/instances
     networks:
       - evolution-net
     env_file:
       - .env
     depends_on:
-      evolution_postgres:
+      evolution-postgres:
         condition: service_healthy
-      evolution_redis:
+      evolution-redis:
         condition: service_started
 
-  evolution_postgres:
-    container_name: evolution_postgres
+  evolution-postgres:
+    container_name: evolution-postgres
     image: postgres:16
     restart: always
     environment:
@@ -120,7 +126,7 @@ services:
     ports:
       - "$pg_port:5432"
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - pg-data:/var/lib/postgresql/data
     networks:
       - evolution-net
     healthcheck:
@@ -129,8 +135,8 @@ services:
       timeout: 5s
       retries: 5
 
-  evolution_redis:
-    container_name: evolution_redis
+  evolution-redis:
+    container_name: evolution-redis
     image: redis:alpine
     restart: always
     ports:
@@ -139,12 +145,11 @@ services:
       - evolution-net
 EOL
 
-# Anexa MinIO se solicitado
 if [ "$install_minio" == "s" ]; then
   cat >> docker-compose.yml << EOL
 
-  evolution_minio:
-    container_name: evolution_minio
+  evolution-minio:
+    container_name: evolution-minio
     image: minio/minio
     restart: always
     ports:
@@ -154,14 +159,13 @@ if [ "$install_minio" == "s" ]; then
       MINIO_ROOT_USER: $minio_user
       MINIO_ROOT_PASSWORD: $minio_password
     volumes:
-      - minio_data:/data
+      - minio-data:/data
     networks:
       - evolution-net
     command: server /data --console-address ":9001"
 EOL
 fi
 
-# Finaliza com volumes e rede forçando o nome correto
 cat >> docker-compose.yml << EOL
 
 networks:
@@ -170,12 +174,12 @@ networks:
     name: evolution-net
 
 volumes:
-  evolution_instances:
-  pg_data:
+  evolution-instances:
+  pg-data:
 EOL
 
 if [ "$install_minio" == "s" ]; then
-  echo "  minio_data:" >> docker-compose.yml
+  echo "  minio-data:" >> docker-compose.yml
 fi
 
 # ==========================================
@@ -184,16 +188,17 @@ fi
 docker-compose pull
 docker-compose up -d
 
+# Criação do Bucket corrigida (agora com hífen)
 if [ "$install_minio" == "s" ]; then
     echo "Aguardando MinIO iniciar para criar o bucket..."
     sleep 10
     docker run --rm --network evolution-net \
       --entrypoint /bin/sh minio/mc -c "
-      mc alias set local http://evolution_minio:9000 $minio_user $minio_password;
+      mc alias set local http://evolution-minio:9000 $minio_user $minio_password;
       mc mb local/evolution || true;
       mc anonymous set public local/evolution;
     "
-    echo -e "${GREEN}Bucket 'evolution' configurado!${NC}"
+    echo -e "${GREEN}Bucket 'evolution' configurado e público!${NC}"
 fi
 
 echo -e "\n${GREEN}==================================================${NC}"
