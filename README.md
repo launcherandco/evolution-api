@@ -28,7 +28,7 @@ Ligue-se ao seu servidor via SSH e execute os seguintes comandos:
 
 ```bash
 # 1. Clone o repositório
-git clone [https://github.com/launcherandco/evolution-api.git](https://github.com/launcherandco/evolution-api.git)
+git clone https://github.com/launcherandco/evolution-api.git
 
 # 2. Acesse a pasta
 cd evolution-api
