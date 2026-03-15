@@ -1,21 +1,11 @@
 #!/bin/bash
 
-# Cores para feedback
+# Cores
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-RED='\033[0;31m'
 NC='\033[0m'
 
-# 1. Verificação de Ambiente (Painéis)
-if [ -d "/etc/cloudpanel" ] || [ -d "/usr/local/psa" ]; then
-    echo -e "${YELLOW}Detectado painel de controle (CloudPanel/Plesk).${NC}"
-    echo -e "O script não configurará o Nginx automaticamente para evitar conflitos."
-    HAS_PANEL=true
-else
-    HAS_PANEL=false
-fi
-
-# 2. Coleta de Informações (Valores Escolhidos)
+# 1. Coleta de Informações
 read -p "Link da API (ex: api.dominio.com): " evolution
 echo ""
 read -p "Deseja instalar/atualizar o MinIO? (s/n): " install_minio
@@ -28,56 +18,111 @@ if [ "$install_minio" == "s" ]; then
   echo ""
 fi
 
-# 3. Gestão de Pastas e Atualização
-if [ -d "evolution-api" ]; then
-    echo -e "${YELLOW}Atualizando instalação existente...${NC}"
-    cd evolution-api
-    # Backup preventivo do .env
-    cp .env .env.bak
-else
-    echo -e "${GREEN}Nova instalação...${NC}"
-    git clone https://github.com/EvolutionAPI/evolution-api.git
-    cd evolution-api
-    # Gerar API KEY inicial apenas se for novo
-    echo "AUTHENTICATION_API_KEY=$(openssl rand -hex 16)" > .env
-fi
-
-# 4. Definição de Portas (Faremos fixas para facilitar o mapeamento no painel)
-# Você pode alterar essas portas se já estiverem em uso
-api_port=8080
+# 2. Configuração de Portas e Token
+api_port=8090
 pg_port=5433
 redis_port=6380
 minio_port=9000
 minio_console_port=9001
 
-# 5. Configuração do .env (Adição/Update do MinIO)
+if [ -f ".env" ]; then
+    echo -e "${YELLOW}Atualizando ambiente existente...${NC}"
+    UNIQUE_TOKEN=$(grep AUTHENTICATION_API_KEY .env | cut -d'=' -f2)
+else
+    echo -e "${GREEN}Iniciando nova configuração na raiz...${NC}"
+    UNIQUE_TOKEN=$(openssl rand -hex 16 | tr '[:lower:]' '[:upper:]')
+fi
+
+# 3. Geração do .env COMPLETO
+cat > .env << EOL
+# Servidor
+SERVER_TYPE=http
+SERVER_PORT=$api_port
+SERVER_URL=https://$evolution
+
+# Segurança
+AUTHENTICATION_API_KEY=$UNIQUE_TOKEN
+AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
+LANGUAGE=pt-BR
+
+# Logs
+LOG_LEVEL=ERROR,WARN,DEBUG,INFO,LOG,VERBOSE,DARK,WEBHOOKS
+LOG_COLOR=true
+LOG_BAILEYS=error
+
+# Banco de Dados (PostgreSQL)
+DATABASE_PROVIDER=postgresql
+DATABASE_CONNECTION_URI=postgresql://postgres:p8KkRN1EKeCbrou6@evolution_postgres:5432/evolution_db?schema=public
+DATABASE_CONNECTION_CLIENT_NAME=evolution_exchange
+DATABASE_SAVE_DATA_INSTANCE=true
+DATABASE_SAVE_DATA_NEW_MESSAGE=true
+DATABASE_SAVE_MESSAGE_UPDATE=true
+DATABASE_SAVE_DATA_CONTACTS=true
+DATABASE_SAVE_DATA_CHATS=true
+DATABASE_SAVE_DATA_LABELS=true
+DATABASE_SAVE_DATA_HISTORIC=true
+
+# Cache (Redis)
+CACHE_REDIS_ENABLED=true
+CACHE_REDIS_URI=redis://evolution_redis:6379/2
+CACHE_REDIS_PREFIX_KEY=evolution
+CACHE_REDIS_SAVE_INSTANCES=false
+CACHE_LOCAL_ENABLED=false
+
+# Webhooks e Websocket
+WEBHOOK_GLOBAL_ENABLED=true
+WEBHOOK_GLOBAL_URL=''
+WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS=true
+WEBSOCKET_ENABLED=true
+WEBSOCKET_GLOBAL_EVENTS=true
+
+# QR Code
+QRCODE_LIMIT=9999
+QRCODE_COLOR='#175197'
+
+# Instância
+DEL_INSTANCE=false
+CONFIG_SESSION_PHONE_CLIENT=Evolution API
+CONFIG_SESSION_PHONE_NAME=Chrome
+EOL
+
 if [ "$install_minio" == "s" ]; then
-    # Remove configurações de S3 anteriores para evitar duplicidade
-    sed -i '/S3_/d' .env
     cat >> .env << EOL
+
+# Armazenamento S3 (MinIO)
 S3_ENABLED=true
 S3_ACCESS_KEY=$minio_user
 S3_SECRET_KEY=$minio_password
 S3_BUCKET=evolution
 S3_PORT=$minio_port
-S3_ENDPOINT=evolution_minio
+S3_ENDPOINT=$minio_domain
 S3_REGION=us-east-1
-S3_USE_SSL=false
+S3_USE_SSL=true
 EOL
 fi
 
-# 6. Docker Compose (Mantendo volumes para não perder dados)
+# 4. Geração do docker-compose.yml
 cat > docker-compose.yml << EOL
 version: '3.8'
+
 services:
   api:
     container_name: evolution_api
     image: evoapicloud/evolution-api:latest
     restart: always
-    ports: ["$api_port:$api_port"]
-    networks: [evolution-net]
-    env_file: [.env]
-    depends_on: [evolution_postgres, evolution_redis]
+    ports:
+      - "$api_port:$api_port"
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - evolution-net
+    env_file:
+      - .env
+    depends_on:
+      evolution_postgres:
+        condition: service_healthy
+      evolution_redis:
+        condition: service_started
 
   evolution_postgres:
     container_name: evolution_postgres
@@ -87,61 +132,86 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: p8KkRN1EKeCbrou6
       POSTGRES_DB: evolution_db
-    ports: ["$pg_port:5432"]
-    volumes: [pg_data:/var/lib/postgresql/data]
-    networks: [evolution-net]
+    ports:
+      - "$pg_port:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - evolution-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   evolution_redis:
     container_name: evolution_redis
     image: redis:alpine
     restart: always
-    ports: ["$redis_port:6379"]
-    networks: [evolution-net]
+    ports:
+      - "$redis_port:6379"
+    networks:
+      - evolution-net
+
+networks:
+  evolution-net:
+    driver: bridge
+
+volumes:
+  evolution_instances:
+  pg_data:
 EOL
 
 if [ "$install_minio" == "s" ]; then
+  sed -i '/networks:/,$d' docker-compose.yml
   cat >> docker-compose.yml << EOL
   evolution_minio:
     container_name: evolution_minio
     image: minio/minio
     restart: always
-    ports: ["$minio_port:9000", "$minio_console_port:9001"]
+    ports:
+      - "$minio_port:9000"
+      - "$minio_console_port:9001"
     environment:
       MINIO_ROOT_USER: $minio_user
       MINIO_ROOT_PASSWORD: $minio_password
-    volumes: [minio_data:/data]
-    networks: [evolution-net]
+    volumes:
+      - minio_data:/data
+    networks:
+      - evolution-net
     command: server /data --console-address ":9001"
+
+networks:
+  evolution-net:
+    driver: bridge
+
+volumes:
+  evolution_instances:
+  pg_data:
+  minio_data:
 EOL
 fi
 
-echo "networks: { evolution-net: { driver: bridge } }
-volumes: { pg_data: {}, minio_data: {} }" >> docker-compose.yml
-
-# 7. Start
+# 5. Inicialização
+docker-compose down --remove-orphans
 docker-compose pull
 docker-compose up -d
 
-# 8. Instruções Finais (O "Pulo do Gato")
-echo -e "\n${GREEN}==================================================${NC}"
-echo -e "${GREEN} INSTALAÇÃO/ATUALIZAÇÃO CONCLUÍDA! ${NC}"
-echo -e "${GREEN}==================================================${NC}"
-
-if [ "$HAS_PANEL" = true ]; then
-    echo -e "${YELLOW}COMO VOCÊ USA PAINEL (PLESK/CLOUD_PANEL):${NC}"
-    echo -e "1. Crie os sites/subdomínios: $evolution e $minio_domain no seu painel."
-    echo -e "2. No Reverse Proxy (ou Vhost), aponte:"
-    echo -e "   - $evolution -> http://127.0.0.1:$api_port"
-    echo -e "   - $minio_domain -> http://127.0.0.1:$minio_console_port"
-    echo -e "3. Habilite o SSL (Let's Encrypt) diretamente pelo seu painel."
-else
-    echo -e "${YELLOW}DICA: Como você não tem painel, use o Nginx nativo para expor as portas.$NC"
-    echo -e "A API está rodando internamente na porta $api_port"
-fi
-
+# 6. Criar Bucket Automaticamente (se MinIO ativado)
 if [ "$install_minio" == "s" ]; then
-    echo -e "\n${GREEN}DADOS DO MINIO:${NC}"
-    echo -e "User: $minio_user"
-    echo -e "Pass: $minio_password"
-    echo -e "Acesse via: http://IP_DO_SERVIDOR:$minio_console_port (ou via Proxy se configurado)"
+    echo "Aguardando MinIO iniciar para criar o bucket..."
+    sleep 10
+    docker run --rm --network evolution-net \
+      --entrypoint /bin/sh minio/mc -c "
+      mc alias set local http://evolution_minio:9000 $minio_user $minio_password;
+      mc mb local/evolution || true;
+      mc anonymous set public local/evolution;
+    "
+    echo -e "${GREEN}Bucket 'evolution' configurado como público!${NC}"
 fi
+
+echo -e "\n${GREEN}==================================================${NC}"
+echo -e "TOKEN ÚNICO: ${YELLOW}$UNIQUE_TOKEN${NC}"
+echo -e "API: https://$evolution"
+[ "$install_minio" == "s" ] && echo -e "MinIO: https://$minio_domain"
+echo -e "${GREEN}==================================================${NC}"
