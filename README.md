@@ -26,12 +26,7 @@ Este script Bash automatiza o processo de instalação e atualização da **Evol
 Ligue-se ao seu servidor via SSH e execute os seguintes comandos:
 
 ```bash
-# 1. Clonar o repositório (cria a pasta evolution-api)
 git clone https://github.com/launcherandco/evolution-api.git
-
-# 2. Entrar na pasta
 cd evolution-api
-
-# 3. Dar permissão e executar o script (estando dentro da pasta)
 chmod +x evolution.sh
 ./evolution.sh
