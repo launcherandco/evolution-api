@@ -26,6 +26,6 @@ Este script Bash automatiza o processo de instalação e atualização da **Evol
 Ligue-se ao seu servidor via SSH e execute os seguintes comandos:
 
 ```bash
-wget [https://raw.githubusercontent.com/seu-usuario/seu-repo/main/evolution.sh](https://raw.githubusercontent.com/seu-usuario/seu-repo/main/evolution.sh)
+git clone https://github.com/launcherandco/evolution-api.git
 chmod +x evolution.sh
 ./evolution.sh
