@@ -1,11 +1,9 @@
 #!/bin/bash
 
-# Cores
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# 1. Coleta de Informações
 read -p "Link da API (ex: api.dominio.com): " evolution
 echo ""
 read -p "Deseja instalar/atualizar o MinIO? (s/n): " install_minio
@@ -18,7 +16,6 @@ if [ "$install_minio" == "s" ]; then
   echo ""
 fi
 
-# 2. Configuração de Portas e Token
 api_port=8090
 pg_port=5433
 redis_port=6380
@@ -26,31 +23,26 @@ minio_port=9000
 minio_console_port=9001
 
 if [ -f ".env" ]; then
-    echo -e "${YELLOW}Atualizando ambiente existente...${NC}"
+    echo -e "${YELLOW}Atualizando ambiente...${NC}"
     UNIQUE_TOKEN=$(grep AUTHENTICATION_API_KEY .env | cut -d'=' -f2)
 else
-    echo -e "${GREEN}Iniciando nova configuração na raiz...${NC}"
+    echo -e "${GREEN}Iniciando configuração limpa...${NC}"
     UNIQUE_TOKEN=$(openssl rand -hex 16 | tr '[:lower:]' '[:upper:]')
 fi
 
-# 3. Geração do .env COMPLETO
+# ==========================================
+# 1. GERAÇÃO DO .ENV
+# ==========================================
 cat > .env << EOL
-# Servidor
 SERVER_TYPE=http
 SERVER_PORT=$api_port
 SERVER_URL=https://$evolution
-
-# Segurança
 AUTHENTICATION_API_KEY=$UNIQUE_TOKEN
 AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
 LANGUAGE=pt-BR
-
-# Logs
 LOG_LEVEL=ERROR,WARN,DEBUG,INFO,LOG,VERBOSE,DARK,WEBHOOKS
 LOG_COLOR=true
 LOG_BAILEYS=error
-
-# Banco de Dados (PostgreSQL)
 DATABASE_PROVIDER=postgresql
 DATABASE_CONNECTION_URI=postgresql://postgres:p8KkRN1EKeCbrou6@evolution_postgres:5432/evolution_db?schema=public
 DATABASE_CONNECTION_CLIENT_NAME=evolution_exchange
@@ -61,26 +53,18 @@ DATABASE_SAVE_DATA_CONTACTS=true
 DATABASE_SAVE_DATA_CHATS=true
 DATABASE_SAVE_DATA_LABELS=true
 DATABASE_SAVE_DATA_HISTORIC=true
-
-# Cache (Redis)
 CACHE_REDIS_ENABLED=true
 CACHE_REDIS_URI=redis://evolution_redis:6379/2
 CACHE_REDIS_PREFIX_KEY=evolution
 CACHE_REDIS_SAVE_INSTANCES=false
 CACHE_LOCAL_ENABLED=false
-
-# Webhooks e Websocket
 WEBHOOK_GLOBAL_ENABLED=true
 WEBHOOK_GLOBAL_URL=''
 WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS=true
 WEBSOCKET_ENABLED=true
 WEBSOCKET_GLOBAL_EVENTS=true
-
-# QR Code
 QRCODE_LIMIT=9999
 QRCODE_COLOR='#175197'
-
-# Instância
 DEL_INSTANCE=false
 CONFIG_SESSION_PHONE_CLIENT=Evolution API
 CONFIG_SESSION_PHONE_NAME=Chrome
@@ -89,7 +73,6 @@ EOL
 if [ "$install_minio" == "s" ]; then
     cat >> .env << EOL
 
-# Armazenamento S3 (MinIO)
 S3_ENABLED=true
 S3_ACCESS_KEY=$minio_user
 S3_SECRET_KEY=$minio_password
@@ -101,7 +84,9 @@ S3_USE_SSL=true
 EOL
 fi
 
-# 4. Geração do docker-compose.yml
+# ==========================================
+# 2. GERAÇÃO DO DOCKER-COMPOSE.YML
+# ==========================================
 cat > docker-compose.yml << EOL
 version: '3.8'
 
@@ -152,19 +137,12 @@ services:
       - "$redis_port:6379"
     networks:
       - evolution-net
-
-networks:
-  evolution-net:
-    driver: bridge
-
-volumes:
-  evolution_instances:
-  pg_data:
 EOL
 
+# Anexa MinIO se solicitado
 if [ "$install_minio" == "s" ]; then
-  sed -i '/networks:/,$d' docker-compose.yml
   cat >> docker-compose.yml << EOL
+
   evolution_minio:
     container_name: evolution_minio
     image: minio/minio
@@ -180,24 +158,32 @@ if [ "$install_minio" == "s" ]; then
     networks:
       - evolution-net
     command: server /data --console-address ":9001"
+EOL
+fi
+
+# Finaliza com volumes e rede forçando o nome correto
+cat >> docker-compose.yml << EOL
 
 networks:
   evolution-net:
     driver: bridge
+    name: evolution-net
 
 volumes:
   evolution_instances:
   pg_data:
-  minio_data:
 EOL
+
+if [ "$install_minio" == "s" ]; then
+  echo "  minio_data:" >> docker-compose.yml
 fi
 
-# 5. Inicialização
-docker-compose down --remove-orphans
+# ==========================================
+# 3. EXECUÇÃO
+# ==========================================
 docker-compose pull
 docker-compose up -d
 
-# 6. Criar Bucket Automaticamente (se MinIO ativado)
 if [ "$install_minio" == "s" ]; then
     echo "Aguardando MinIO iniciar para criar o bucket..."
     sleep 10
@@ -207,7 +193,7 @@ if [ "$install_minio" == "s" ]; then
       mc mb local/evolution || true;
       mc anonymous set public local/evolution;
     "
-    echo -e "${GREEN}Bucket 'evolution' configurado como público!${NC}"
+    echo -e "${GREEN}Bucket 'evolution' configurado!${NC}"
 fi
 
 echo -e "\n${GREEN}==================================================${NC}"
