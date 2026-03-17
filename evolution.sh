@@ -4,7 +4,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}Iniciando Instalador Evolution API (Padrão Hífen)...${NC}"
+echo -e "${GREEN}Iniciando Instalador Evolution API (Atualizado para Docker v2)...${NC}"
 
 read -p "Link da API (ex: api.dominio.com): " evolution
 echo ""
@@ -87,6 +87,7 @@ S3_PORT=$minio_port
 S3_ENDPOINT=evolution-minio
 S3_REGION=us-east-1
 S3_USE_SSL=false
+S3_USE_PATH_STYLE=true
 EOL
 fi
 
@@ -94,7 +95,6 @@ fi
 # 2. GERAÇÃO DO DOCKER-COMPOSE.YML
 # ==========================================
 cat > docker-compose.yml << EOL
-version: '3.8'
 
 services:
   evolution-api:
@@ -185,8 +185,8 @@ fi
 # ==========================================
 # 3. EXECUÇÃO
 # ==========================================
-docker-compose pull
-docker-compose up -d
+docker compose pull
+docker compose up -d
 
 # Criação do Bucket corrigida (agora com hífen)
 if [ "$install_minio" == "s" ]; then
